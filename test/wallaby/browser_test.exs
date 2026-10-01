@@ -141,6 +141,40 @@ defmodule Wallaby.BrowserTest do
     test "it retries until time runs out" do
       assert Browser.retry(fn -> {:error, :some_error} end) == {:error, :some_error}
     end
+
+    test "it pauses between attempts instead of busy-looping" do
+      ensure_setting_is_reset(:wallaby, :max_wait_time)
+      Application.put_env(:wallaby, :max_wait_time, 500)
+      ensure_setting_is_reset(:wallaby, :retry_interval)
+      Application.put_env(:wallaby, :retry_interval, 50)
+
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      assert Browser.retry(fn ->
+               Agent.update(counter, &(&1 + 1))
+               {:error, :some_error}
+             end) == {:error, :some_error}
+
+      # 500ms / 50ms is ten pauses, so about eleven attempts. Without the
+      # pause, this loop runs many thousands of times.
+      assert Agent.get(counter, & &1) <= 12
+    end
+
+    test "a retry_interval of 0 keeps the old back-to-back behaviour" do
+      ensure_setting_is_reset(:wallaby, :max_wait_time)
+      Application.put_env(:wallaby, :max_wait_time, 100)
+      ensure_setting_is_reset(:wallaby, :retry_interval)
+      Application.put_env(:wallaby, :retry_interval, 0)
+
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Browser.retry(fn ->
+        Agent.update(counter, &(&1 + 1))
+        {:error, :some_error}
+      end)
+
+      assert Agent.get(counter, & &1) > 12
+    end
   end
 
   defp session_for_driver(driver) do

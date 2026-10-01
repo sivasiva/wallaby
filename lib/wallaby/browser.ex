@@ -127,6 +127,7 @@ defmodule Wallaby.Browser do
   @type opts :: Query.opts()
 
   @default_max_wait_time 3_000
+  @default_retry_interval 50
 
   @doc """
   Attempts to synchronize with the browser. This is most often used to
@@ -150,6 +151,7 @@ defmodule Wallaby.Browser do
         {:ok, result}
 
       {:error, :stale_reference} ->
+        pause_before_retry()
         retry(f, start_time)
 
       {:error, :invalid_selector} ->
@@ -159,6 +161,7 @@ defmodule Wallaby.Browser do
         if max_time_exceeded?(start_time) do
           {:error, e}
         else
+          pause_before_retry()
           retry(f, start_time)
         end
     end
@@ -1523,6 +1526,17 @@ defmodule Wallaby.Browser do
 
   defp max_wait_time do
     Application.get_env(:wallaby, :max_wait_time, @default_max_wait_time)
+  end
+
+  # Without a pause, every attempt goes straight back to the driver: one
+  # query against an absent element makes hundreds of WebDriver requests a
+  # second until `max_wait_time` runs out, and keeps the driver, the browser
+  # and the BEAM busy the whole time.
+  defp pause_before_retry do
+    case Application.get_env(:wallaby, :retry_interval, @default_retry_interval) do
+      0 -> :ok
+      interval -> Process.sleep(interval)
+    end
   end
 
   defp request_url(path) do
